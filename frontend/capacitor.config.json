@@ -1,0 +1,12 @@
+{
+  "appId": "com.chaosarena.game",
+  "appName": "Chaos Arena",
+  "webDir": "out",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "cleartext": true
+  }
+}

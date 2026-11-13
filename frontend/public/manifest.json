@@ -1,0 +1,10 @@
+{
+  "name": "Chaos Arena 3D Party Game",
+  "short_name": "ChaosArena",
+  "description": "Juego multijugador 3D de físicas caóticas por equipos y rondas.",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#090d16",
+  "theme_color": "#f59e0b"
+}

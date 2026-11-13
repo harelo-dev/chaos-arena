@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Chaos Arena</string>
+    <string name="title_activity_main">Chaos Arena</string>
+    <string name="package_name">com.chaosarena.game</string>
+    <string name="custom_url_scheme">com.chaosarena.game</string>
+</resources>
