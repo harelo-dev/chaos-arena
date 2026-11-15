@@ -83,7 +83,8 @@ export class SceneManager {
   private mobileMoveZ: number = 0;
   private mobileJumpRequested: boolean = false;
   private cameraYaw: number = 0;
-  private cameraPitch: number = 0.42;
+  private cameraPitch: number = 0.38;
+  private lastManualCameraTime: number = -10;
   private isChargingThrow: boolean = false;
   private throwCharge: number = 0;
   private elapsedTime: number = 0;
@@ -101,10 +102,10 @@ export class SceneManager {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
-      60,
+      62,
       container.clientWidth / Math.max(1, container.clientHeight),
       0.1,
-      150
+      260
     );
 
     this.renderer = new THREE.WebGLRenderer({
@@ -116,6 +117,8 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     container.innerHTML = "";
     container.appendChild(this.renderer.domElement);
 
@@ -189,9 +192,10 @@ export class SceneManager {
       if (e.buttons === 1 || document.pointerLockElement === this.renderer.domElement) {
         this.cameraYaw -= e.movementX * 0.0045;
         this.cameraPitch = Math.max(
-          0.18,
+          0.16,
           Math.min(1.15, this.cameraPitch + e.movementY * 0.0035)
         );
+        this.lastManualCameraTime = this.elapsedTime;
       }
     };
 
@@ -236,7 +240,8 @@ export class SceneManager {
           lastTouchX = t.clientX;
           lastTouchY = t.clientY;
           this.cameraYaw -= dx * 0.006;
-          this.cameraPitch = Math.max(0.18, Math.min(1.15, this.cameraPitch + dy * 0.0045));
+          this.cameraPitch = Math.max(0.16, Math.min(1.15, this.cameraPitch + dy * 0.0045));
+          this.lastManualCameraTime = this.elapsedTime;
         }
       },
       { passive: true }
@@ -324,10 +329,21 @@ export class SceneManager {
     for (const pdata of roster) {
       const idx = pdata.team === "red" ? redIdx++ : blueIdx++;
       const spawn = this.currentWorldModule.getSpawnPoint(pdata.team, idx);
-      this.ensurePlayerEntity(pdata, spawn);
+      const rp = this.ensurePlayerEntity(pdata, spawn);
+      // Orient players toward the center of the arena on spawn
+      rp.rotY = pdata.team === "red" ? Math.PI / 2 : -Math.PI / 2;
+      rp.targetRotY = rp.rotY;
     }
 
-    this.cameraYaw = 0;
+    const local = this.players.get(this.localPlayerId);
+    if (local) {
+      // Position camera directly behind the character's back looking forward
+      this.cameraYaw = local.rotY + Math.PI;
+      this.cameraPitch = 0.36;
+      this.lastManualCameraTime = -10;
+    } else {
+      this.cameraYaw = 0;
+    }
   }
 
   private ensurePlayerEntity(
@@ -644,8 +660,8 @@ export class SceneManager {
     const local = this.players.get(this.localPlayerId);
     if (!local) return;
 
-    const dRed = Math.hypot(local.pos.x - -16.25, local.pos.z - 0);
-    const dBlue = Math.hypot(local.pos.x - 16.25, local.pos.z - 0);
+    const dRed = Math.hypot(local.pos.x - -25.0, local.pos.z - 0);
+    const dBlue = Math.hypot(local.pos.x - 25.0, local.pos.z - 0);
 
     if (dRed < 5.5) {
       this.gates.red_gate = !this.gates.red_gate;
@@ -913,6 +929,19 @@ export class SceneManager {
         local.body.setLinvel({ x: wx * baseSpeed, y: lv.y, z: wz * baseSpeed }, true);
         local.rotY = Math.atan2(wx, wz);
         local.anim = local.carryingId ? "carrying" : "run";
+
+        // Smart Auto-Follow Behind Camera: smoothly align behind character's back when moving
+        // if the user hasn't manually orbited the camera in the last 1.6 seconds
+        if (this.elapsedTime - this.lastManualCameraTime > 1.6) {
+          const desiredYaw = local.rotY + Math.PI;
+          const yawDiff = Math.atan2(
+            Math.sin(desiredYaw - this.cameraYaw),
+            Math.cos(desiredYaw - this.cameraYaw)
+          );
+          // Smoothly rotate camera behind player (stronger when turning forward/sideways)
+          this.cameraYaw += yawDiff * Math.min(1, _dt * 2.8);
+          this.cameraPitch = THREE.MathUtils.lerp(this.cameraPitch, 0.36, Math.min(1, _dt * 2.0));
+        }
       } else {
         local.body.setLinvel({ x: lv.x * 0.82, y: lv.y, z: lv.z * 0.82 }, true);
         local.anim = local.carryingId ? "carrying" : "idle";
@@ -934,26 +963,29 @@ export class SceneManager {
       }
     }
 
-    // Update 3rd-Person Spring Camera
-    const camDist = 11.5;
-    const camHeight = 6.5 * Math.sin(this.cameraPitch) + 2.5;
+    // Update 3rd-Person Spring Camera (positioned behind character looking forward)
+    const camDist = 12.6;
+    const camHeight = 6.8 * Math.sin(this.cameraPitch) + 2.4;
     const horizDist = camDist * Math.cos(this.cameraPitch * 0.5);
     const targetCamPos = new THREE.Vector3(
       local.pos.x + Math.sin(this.cameraYaw) * horizDist,
       local.pos.y + camHeight,
       local.pos.z + Math.cos(this.cameraYaw) * horizDist
     );
-    this.camera.position.lerp(targetCamPos, 0.16);
-    this.camera.lookAt(local.pos.x, local.pos.y + 1.4, local.pos.z);
+    this.camera.position.lerp(targetCamPos, 0.18);
+    // Look slightly ahead of the character in the direction the camera is facing
+    const lookAheadX = local.pos.x - Math.sin(this.cameraYaw) * 2.2;
+    const lookAheadZ = local.pos.z - Math.cos(this.cameraYaw) * 2.2;
+    this.camera.lookAt(lookAheadX, local.pos.y + 1.55, lookAheadZ);
 
     // Check gate proximity hint on Granja
     let gateHint: string | null = null;
     if (this.currentWorldModule?.id === "granja") {
-      if (Math.hypot(local.pos.x - -16.25, local.pos.z) < 5.5) {
+      if (Math.hypot(local.pos.x - -25.0, local.pos.z) < 6.0) {
         gateHint = `Presiona [Q] para ${
           this.gates.red_gate ? "CERRAR" : "ABRIR"
         } Puerta del Corral ROJO`;
-      } else if (Math.hypot(local.pos.x - 16.25, local.pos.z) < 5.5) {
+      } else if (Math.hypot(local.pos.x - 25.0, local.pos.z) < 6.0) {
         gateHint = `Presiona [Q] para ${
           this.gates.blue_gate ? "CERRAR" : "ABRIR"
         } Puerta del Corral AZUL`;
